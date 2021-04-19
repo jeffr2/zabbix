@@ -1,0 +1,154 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zabbix-pvc
+  namespace: infra
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: zabbix-pv
+  namespace: infra
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  claimRef:
+    namespace: infra
+    name: zabbix-pvc
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    server: nfs.mydomain.com
+    path: "/var/nfs/volumes/zabbix"
+    readOnly: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zabbix
+  namespace: infra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zabbix
+  template:
+    metadata:
+      labels:
+        app: zabbix
+    spec:
+      containers:
+        - name: zabbix-server
+          image: zabbix-server:alpine-5.2-latest
+          env:
+            - name: DB_SERVER_HOST
+              value: "mysql.mydomain.com"
+            - name: DB_SERVER_PORT
+              value: "3306"
+            - name: MYSQL_USER
+              value: "user_zabbix"
+            - name: MYSQL_PASSWORD
+              value: "mypassword"
+            - name: MYSQL_DATABASE
+              value: "db_zabbix"
+          ports:
+          - name: port10051
+            containerPort: 10051
+          volumeMounts:
+          - name: zabbix-vol
+            mountPath: "/usr/lib/zabbix/alertscripts"
+            subPath: alertscripts
+          - name: zabbix-vol
+            mountPath: "/usr/lib/zabbix/externalscripts"
+            subPath: externalscripts
+          - name: zabbix-vol
+            mountPath: "/var/lib/zabbix/modules"
+            subPath: modules
+          - name: zabbix-vol
+            mountPath: "/var/lib/zabbix/enc"
+            subPath: enc
+          - name: zabbix-vol
+            mountPath: "/var/lib/zabbix/ssh_keys"
+            subPath: ssh_keys
+          - name: zabbix-vol
+            mountPath: "/var/lib/zabbix/ssl"
+            subPath: ssl
+          - name: zabbix-vol
+            mountPath: "/var/lib/zabbix/snmptraps"
+            subPath: snmptraps
+          - name: zabbix-vol
+            mountPath: "/var/lib/zabbix/mibs"
+            subPath: mibs
+          - name: zabbix-vol
+            mountPath: "/var/lib/zabbix/export"
+            subPath: export
+        - name: zabbix-web
+          image: zabbix-web:alpine-5.2-latest
+          env:
+            - name: DB_SERVER_HOST
+              value: "mysql.mydomain.com"
+            - name: DB_SERVER_PORT
+              value: "3306"
+            - name: MYSQL_USER
+              value: "user_zabbix"
+            - name: MYSQL_PASSWORD
+              value: "mypassword"
+            - name: MYSQL_DATABASE
+              value: "db_zabbix"
+            - name: PHP_TZ
+              value: "America/Sao_Paulo"
+            - name: ZBX_SERVER_NAME
+              value: "zabbix.mydomain.com"
+            - name: ZBX_SERVER_HOST
+              value: "localhost"
+          ports:
+          - name: port8080
+            containerPort: 8080
+        - name: zabbix-agent
+          image: zabbix-agent:alpine-5.2-latest
+          env:
+          - name: ZBX_HOSTNAME
+            value: "zabbix.mydomain.com"
+          - name: ZBX_SERVER_HOST
+            value: "localhost"
+          - name: ZBX_PASSIVE_ALLOW
+            value: "true"
+          - name: ZBX_STARTAGENTS
+            value: "3"
+          - name: ZBX_TIMEOUT
+            value: "10"
+          securityContext:
+            privileged: true
+          ports:
+          - name: port10050
+            containerPort: 10050
+      dnsPolicy: Default
+      volumes:
+      - name: zabbix-vol
+        persistentVolumeClaim:
+          claimName: zabbix-pvc
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: zabbix
+  namespace: infra
+  labels:
+    app: zabbix
+spec:
+  selector:
+    app: zabbix
+  ports:
+  - name: port8080
+    protocol: TCP
+    port: 8080
+    nodePort: 30006
+  type: NodePort
